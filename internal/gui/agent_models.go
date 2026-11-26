@@ -106,6 +106,13 @@ func ownFields(a *agent.Agent, vals map[string]string) []fieldJSON {
 	return fieldsOf(a, vals, true)
 }
 
+// groupsShown says the Routing groups plugin is on here: the gateway
+// serves, and ServeGroups is held. The groups magpie finds are the core's
+// for routing, so the gateway still routes a bare model through one, but
+// the Agents page is the window, and off, a plugin's parts leave it
+// (#7602): its lists, counts and pickers show no group.
+func groupsShown() bool { return provider.GroupsServed() }
+
 func fieldsOf(a *agent.Agent, vals map[string]string, own bool) []fieldJSON {
 	out := []fieldJSON{}
 	// read once an agent, for a field that offers routing groups
@@ -117,6 +124,15 @@ func fieldsOf(a *agent.Agent, vals map[string]string, own bool) []fieldJSON {
 		opts := a.Picks(f, vals)
 		if opts == nil {
 			opts = []agent.Option{}
+		}
+		if !groupsShown() {
+			kept := make([]agent.Option, 0, len(opts))
+			for _, o := range opts {
+				if o.Group != agent.RoutingGroups {
+					kept = append(kept, o)
+				}
+			}
+			opts = kept
 		}
 		out = append(out, fieldJSON{Key: f.Key, Label: f.Label, Value: vals[f.Key], Options: opts,
 			Unserved: unservedIn(opts, i == 0 && !own, unserved)})
@@ -227,9 +243,14 @@ func modelCount(id string) *modelCountJSON {
 func countModels(id string) modelCountJSON {
 	listed, _ := provider.ListedFor(id)
 	off := provider.ModelOff(id)
-	c := &modelCountJSON{Listed: len(listed)}
+	shown := groupsShown()
+	c := &modelCountJSON{}
 	at := map[string]int{}
 	for _, e := range listed {
+		if e.Group != "" && !shown {
+			continue // the Routing groups plugin is off: no group is counted
+		}
+		c.Listed++
 		if off(e.ID) {
 			continue
 		}
@@ -279,7 +300,11 @@ func agentModelList(a *agent.Agent) []agentModelJSON {
 	// the ones its visibility keeps after the rest, off, so a provider
 	// added after the agent was narrowed is still in its list to tick
 	n := len(listed)
+	shown := groupsShown()
 	for i, e := range append(listed, kept...) {
+		if e.Group != "" && !shown {
+			continue // the Routing groups plugin is off: no group is listed
+		}
 		m := agentModelJSON{ID: e.ID, Name: e.Name, Group: e.Provider.Name, Icon: e.Provider.Icon, Context: e.Context,
 			Hidden: off(e.ID), InUse: usedBy(a, vals, e), Own: id == "codex" && provider.CodexOwn(e)}
 		if i >= n {
